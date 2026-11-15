@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Catalog, CatalogError, Meta, Op, Result};
+use crate::{Catalog, CatalogError, Meta, Op, PhotoId, Result};
 
 /// Separator of hierarchical keyword levels.
 pub const SEP: char = '|';
@@ -878,21 +878,19 @@ impl Catalog {
     /// appear together with `current` on other photos, then the most used ones. Most frequent
     /// first, at most `n`, never one of `current`.
     pub fn keyword_suggestions(&self, current: &[String], prefix: &str, n: usize) -> Vec<String> {
-        // the photos' keywords with their counts, and those only the list has (none)
-        let mut all = self.keywords();
-        for l in self.keyword_list.values() {
-            if !all.iter().any(|(k, _)| same(k, &l.path)) {
-                all.push((l.path.clone(), 0));
-            }
-        }
-        let has = |k: &str| current.iter().any(|c| same(c, k));
+        let index = self.keyword_index();
+        // asked on every selection change: the walk counts by index row and the scoring reads the
+        // vocabulary by reference, so only the names offered out of it are cloned
+        let has: std::collections::HashSet<String> = current.iter().map(|c| c.to_lowercase()).collect();
         let q = prefix.trim().to_lowercase();
-        let mut scored: Vec<(i64, String)> = if !q.is_empty() {
-            all.into_iter()
-                .filter(|(k, _)| !has(k))
-                .filter_map(|(k, c)| {
-                    let l = k.to_lowercase();
-                    let leaf = l.rsplit(SEP).next().unwrap_or(&l).to_string();
+        let mut scored: Vec<(i64, u32)> = if !q.is_empty() {
+            (0..index.rows() as u32)
+                .filter_map(|i| {
+                    let (l, c) = index.row(i as usize)?;
+                    if has.contains(l) {
+                        return None;
+                    }
+                    let leaf = l.rsplit(SEP).next().unwrap_or(l);
                     let rank = if l.starts_with(&q) || leaf.starts_with(&q) {
                         2
                     } else if l.contains(&q) {
@@ -900,24 +898,48 @@ impl Catalog {
                     } else {
                         return None;
                     };
-                    Some((rank * 1_000_000 + c as i64, k))
+                    Some((rank * 1_000_000 + c as i64, i))
                 })
                 .collect()
         } else {
-            let mut co: std::collections::HashMap<String, i64> = Default::default();
+            // the photos that have one of `current`, each read once (by the index): their other
+            // keywords are what `current` appears together with, counted by counts row
+            let mut co = vec![0i64; index.counts().len()];
             if !current.is_empty() {
-                for p in self.photos().filter(|p| p.in_library()) {
-                    if p.meta.keywords.iter().any(|k| has(k)) {
-                        for k in p.meta.keywords.iter().filter(|k| !has(k)) {
-                            *co.entry(k.clone()).or_default() += 1;
+                let mut seen: std::collections::HashSet<PhotoId> = Default::default();
+                for c in current {
+                    for id in index.photos_of(c) {
+                        if seen.insert(*id)
+                            && let Some(p) = self.photo(*id)
+                        {
+                            for k in &p.meta.keywords {
+                                let l: std::borrow::Cow<str> = if k.chars().any(|ch| ch.to_lowercase().next() != Some(ch)) {
+                                    std::borrow::Cow::Owned(k.to_lowercase())
+                                } else {
+                                    std::borrow::Cow::Borrowed(k)
+                                };
+                                if !has.contains(l.as_ref())
+                                    && let Some(row) = index.id_of(l.as_ref())
+                                {
+                                    co[row as usize] += 1;
+                                }
+                            }
                         }
                     }
                 }
             }
-            all.into_iter().filter(|(k, _)| !has(k)).map(|(k, c)| (co.get(&k).copied().unwrap_or(0) * 1_000_000 + c as i64, k)).collect()
+            (0..index.rows() as u32)
+                .filter_map(|i| {
+                    let (l, c) = index.row(i as usize)?;
+                    let co = co.get(i as usize).copied().unwrap_or(0);
+                    (!has.contains(l)).then_some((co * 1_000_000 + c as i64, i))
+                })
+                .collect()
         };
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase())));
-        scored.into_iter().take(n).map(|(_, k)| k).collect()
+        scored.sort_by(|a, b| {
+            b.0.cmp(&a.0).then_with(|| index.row(a.1 as usize).map_or("", |(l, _)| l).cmp(index.row(b.1 as usize).map_or("", |(l, _)| l)))
+        });
+        scored.into_iter().take(n).filter_map(|(_, i)| index.row_name(i as usize)).map(str::to_string).collect()
     }
 }
 

@@ -135,6 +135,24 @@ impl Caches {
             }
         }
     }
+    /// The selection's keywords as one group without a parent (the whole-path Keywording box),
+    /// built once per selection like the grouped one.
+    pub(crate) fn keyword_flat(
+        &mut self,
+        cat: &lightcraft_catalog::Catalog,
+        selection: &[lightcraft_catalog::PhotoId],
+    ) -> std::sync::Arc<Vec<panels::keywording::Group>> {
+        let key = key_of(selection);
+        match &self.keyword_flat {
+            Some((r, k, g)) if *r == cat.revision && *k == key => g.clone(),
+            _ => {
+                let chips = self.keyword_chips(cat, selection);
+                let g = std::sync::Arc::new(vec![panels::keywording::flat_group(&chips)]);
+                self.keyword_flat = Some((cat.revision, key, g.clone()));
+                g
+            }
+        }
+    }
     /// How many selected photos have each keyword (the Keyword List's tick boxes).
     pub(crate) fn keyword_ticks(
         &mut self,

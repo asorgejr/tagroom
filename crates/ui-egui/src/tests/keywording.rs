@@ -309,6 +309,10 @@ fn a_keyword_shows_that_one_inside_it_is_applied() {
     let (mut h, ids) = two_selected();
     ask(&mut h, "engine.execute", json!({"command": "photo.setMeta", "params": {"ids": ids, "addKeywords": ["travel|Italy|Rome"]}}));
     h.settle(SETTLE);
+    // (the list lays out only what it shows: scroll it into view before reading its rows)
+    let title = h.app.widgets.iter().rev().find(|(w, _)| w == "keywordList:topLevel").map(|(_, r)| r.center()).unwrap();
+    ask(&mut h, "ui.move", json!({"x": title.x, "y": title.y}));
+    ask(&mut h, "ui.scroll", json!({"dy": -(title.y - 100.0)}));
     // folded: `travel` is the only row of the three, and says there is something inside
     assert!(has(&h, "keywordRow:travel") && !has(&h, "keywordRow:travel|Italy"), "folded");
     assert!(has(&h, "keywordInside:travel"));
@@ -415,23 +419,33 @@ fn grouped_keywords_share_a_line_naming_their_parent() {
     assert!(ids.iter().all(|id| keywords_of(&h, *id).iter().any(|k| k == "Places|Italy|Venice")));
 }
 
-// Given sixteen keywords and the grouped box,
+// Given sixteen keywords and either chip mode,
 // when the panel is drawn,
 // then eight lines show with "+N more" for the rest, which shows them all; "Show fewer" brings the
-// short list back. The Keyword List is nearer the top for it.
+// short list back, much nearer the top of the panel.
 #[test]
 fn a_long_grouped_list_is_shortened_until_asked_for() {
     let (mut h, ids) = two_selected();
     give(&mut h, &ids, &sixteen());
-    assert_eq!(count(&h, "keywordChip:"), 16, "whole names: every keyword, as before");
-    assert!(!has(&h, "keywordChipsMore"));
-    let list_before = rect(&h, "field:keywordFilter").top();
+    assert_eq!(count(&h, "keywordChip:"), 8, "whole names: the lines it shows, like the grouped box");
+    assert!(
+        has(&h, "keywordChipsMore") && !has(&h, "keywordChipsFewer"),
+        "whole names stop too: a selection with many keywords cannot lay them all out"
+    );
+    let collapsed_top = rect(&h, "field:keywordFilter").top();
+
+    ask(&mut h, "ui.clickWidget", json!({"id": "keywordChipsMore"}));
+    assert_eq!(count(&h, "keywordChip:"), 16, "whole names show them all when asked");
+    assert!(has(&h, "keywordChipsFewer") && !has(&h, "keywordChipsMore"));
+    let expanded_top = rect(&h, "field:keywordFilter").top();
+    assert!(expanded_top > collapsed_top + 80.0, "the shortened box keeps the Keyword List much nearer the top: {expanded_top} from {collapsed_top}");
+    ask(&mut h, "ui.clickWidget", json!({"id": "keywordChipsFewer"}));
+    assert_eq!(count(&h, "keywordChip:"), 8, "back to the lines it shows");
 
     h.app.ui.settings.keyword_chips = crate::state::KeywordChips::Grouped;
     h.settle(SETTLE);
     assert_eq!(count(&h, "keywordChip:"), 7, "a heading and seven chips");
     assert!(has(&h, "keywordChipsMore") && !has(&h, "keywordChipsFewer"));
-    assert!(rect(&h, "field:keywordFilter").top() < list_before - 80.0, "{} from {list_before}", rect(&h, "field:keywordFilter").top());
 
     ask(&mut h, "ui.clickWidget", json!({"id": "keywordChipsMore"}));
     assert_eq!(count(&h, "keywordChip:"), 16);

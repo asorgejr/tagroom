@@ -613,6 +613,9 @@ pub struct Caches {
     /// The Keywording box's chips grouped by the keyword they are inside, by library revision and
     /// selection.
     keyword_groups: Option<(u64, u64, std::sync::Arc<Vec<panels::keywording::Group>>)>,
+    /// The Keywording box's whole-path chips as one group without a parent, by library revision
+    /// and selection.
+    keyword_flat: Option<(u64, u64, std::sync::Arc<Vec<panels::keywording::Group>>)>,
     /// The Keyword List's tick boxes, by library revision and selection.
     keyword_ticks: Option<(u64, u64, std::sync::Arc<panels::keyword_list::Ticks>)>,
     folder_tree: Option<(u64, std::sync::Arc<Vec<lightcraft_catalog::FolderNode>>)>,

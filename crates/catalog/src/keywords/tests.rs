@@ -820,3 +820,52 @@ fn many_synonyms_are_gathered_once_each_in_order() {
     assert_eq!(file.text.lines().count(), N + 2);
     assert!(started.elapsed() < std::time::Duration::from_secs(20), "took {:?}", started.elapsed());
 }
+
+#[test]
+fn suggestions_read_the_library_as_it_is_now() {
+    // suggestions work off the per-revision keyword index: an applied change is what the next
+    // ask sees, whatever was asked before it
+    let (mut c, ids) = lib(&[&["sunset"], &["sunset", "beach"]]);
+    assert_eq!(c.keyword_suggestions(&kws(&c, ids[0]), "", 5), ["beach"]);
+    let add = |c: &mut Catalog| {
+        let id = c.alloc_photo_id();
+        let mut p = Photo::new(id, Source::Demo { scene: 1 }, "a.jpg", "JPEG", 3, 2, "2026-01-01");
+        p.meta.keywords = vec!["mountain".into()];
+        c.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
+        id
+    };
+    let added = [add(&mut c), add(&mut c), add(&mut c)];
+    let s = c.keyword_suggestions(&["sunset".into()], "", 5);
+    assert_eq!(s.first().map(String::as_str), Some("beach"), "{s:?}: what appears with sunset stays first");
+    assert!(s.contains(&"mountain".to_string()), "{s:?}: a new photo's keyword counts");
+    for id in added {
+        c.apply(Op::RemovePhoto { id }).unwrap();
+    }
+    let s = c.keyword_suggestions(&["sunset".into()], "", 5);
+    assert!(!s.contains(&"mountain".to_string()), "{s:?}: a removed photo's keyword is gone");
+    // keyword edits are what the next ask sees too: a rename is a batch of SetMeta ops, a created
+    // keyword an Op::SetKeyword
+    let op = c.rename_keyword_ops("sunset", "Dusk").unwrap();
+    c.apply(op).unwrap();
+    let s = c.keyword_suggestions(&["dusk".into()], "", 5);
+    assert_eq!(s, ["beach"], "{s:?}: a rename is what the next ask sees");
+    c.apply(Op::SetKeyword { path: "harbor".into(), info: Some(KeywordInfo::default()) }).unwrap();
+    let s = c.keyword_suggestions(&["sunset".into()], "har", 5);
+    assert_eq!(s, ["harbor"], "{s:?}: a created keyword is what the next ask sees");
+}
+
+#[test]
+fn keyword_counts_stay_per_application_and_sorted() {
+    // keywords() is the index's count table: every application counts, spellings apart, by name
+    let (c, _) = lib(&[&["beach", "Sunset"], &["sunset", "beach", "beach"]]);
+    assert_eq!(c.keywords(), vec![("Sunset".to_string(), 1), ("beach".to_string(), 3), ("sunset".to_string(), 1)]);
+}
+
+/// A letter `is_uppercase` misses but `to_lowercase` changes (titlecase ǅ) still counts: its
+/// co-occurrence lands on its row, ahead of a keyword one more photo has.
+#[test]
+fn a_titlecase_letter_still_co_occurs() {
+    let (c, _) = lib(&[&["solo"], &["solo", "ǅarbour"], &["solo", "beach"], &["sand", "sand"]]);
+    let s = c.keyword_suggestions(&["solo".into()], "", 3);
+    assert_eq!(s, ["beach", "ǅarbour", "sand"], "{s:?}");
+}

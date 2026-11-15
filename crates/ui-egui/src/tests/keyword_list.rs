@@ -587,6 +587,8 @@ fn ticking_a_keyword_keeps_the_list_in_place() {
         run(&mut h, "keyword.create", json!({"name": format!("zz{i:02}")}));
     }
     ask(&mut h, "ui.hoverWidget", json!({"id": "keywordList:topLevel"}));
+    // (the list lays out only what it shows: scroll the rows into view before reading them)
+    ask(&mut h, "ui.scroll", json!({"dx": 0, "dy": -1200.0}));
     let row = rect(&h, "keywordRow:zz30");
     ask(&mut h, "ui.scroll", json!({"dx": 0, "dy": -(row.top() - 300.0)}));
     assert!(rect(&h, "field:keyword").top() < 0.0, "the box is scrolled out of sight");
@@ -632,6 +634,8 @@ fn ticks_in_quick_succession_land_on_their_rows() {
         run(&mut h, "keyword.create", json!({"name": format!("zz{i:02}")}));
     }
     ask(&mut h, "ui.hoverWidget", json!({"id": "keywordList:topLevel"}));
+    // (the list lays out only what it shows: scroll the rows into view before reading them)
+    ask(&mut h, "ui.scroll", json!({"dx": 0, "dy": -1200.0}));
     let row = rect(&h, "keywordRow:zz30");
     ask(&mut h, "ui.scroll", json!({"dx": 0, "dy": -(row.top() - 300.0)}));
     let picked: Vec<String> = (30..36).map(|i| format!("zz{i}")).collect();

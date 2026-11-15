@@ -79,7 +79,17 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     }
     let selection = app.session.selected();
     let ticks = app.caches.keyword_ticks(&app.session.catalog, &selection);
+    // only the rows the panel shows lay out: a library's vocabulary can be far more than the
+    // viewport holds. A skipped row still takes its height, so the list's scroll geometry never
+    // changes.
+    let clip = ui.clip_rect();
     for r in &rows {
+        let top = ui.cursor().min.y;
+        let offscreen = top + ROW_H < clip.top() - 2.0 * ROW_H || top > clip.bottom() + 2.0 * ROW_H;
+        if offscreen {
+            ui.allocate_space(vec2(ui.available_width(), ROW_H));
+            continue;
+        }
         row(app, ui, r, &selection, &ticks, filter.trim().is_empty());
     }
     ui.add_space(12.0);

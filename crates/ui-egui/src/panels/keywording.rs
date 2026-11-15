@@ -197,12 +197,9 @@ pub fn chip_row(app: &mut LightcraftApp, ui: &mut egui::Ui, selection: &[PhotoId
         chip_groups(app, ui, &groups, crate::key_of(selection));
         return;
     }
-    ui.horizontal_wrapped(|ui| {
-        for c in chips.iter() {
-            let (body, x) = chip(ui, &c.path, &c.path, !c.on_all(), true, ui.max_rect().width());
-            chip_acts(app, ui, c, body, x);
-        }
-    });
+    // Whole paths: one group, without a heading, so chip_groups gives them the grouped box's bound.
+    let flat = app.caches.keyword_flat(&app.session.catalog, selection);
+    chip_groups(app, ui, &flat, crate::key_of(selection));
 }
 
 /// A drawn chip does its work: its × takes the keyword off the selected photos, its name has the
@@ -524,6 +521,12 @@ pub(crate) struct Group {
     pub parent: String,
     /// Each keyword's name below `parent`, and its chip.
     pub chips: Vec<(String, Chip)>,
+}
+
+/// The selection's keywords as one group without a parent, each chip named by its whole path:
+/// the whole-path Keywording box's shape.
+pub(crate) fn flat_group(chips: &[Chip]) -> Group {
+    Group { parent: String::new(), chips: chips.iter().map(|c| (c.path.clone(), c.clone())).collect() }
 }
 
 /// The chips grouped by the keyword they are inside: the deepest one a chip shares with another
@@ -916,6 +919,33 @@ mod tests {
         assert_eq!(lines(&[(true, vec![90.0; 9])], 100.0, 6.0, true), fits, "nothing to show fewer of");
         assert!(lines(&[], 100.0, 6.0, false).is_empty());
         assert!(lines(&[(true, vec![])], 100.0, 6.0, false).is_empty(), "a group without chips has no heading");
+    }
+
+    /// Whole-path chips (the default mode) stop where the grouped box stops — the lines it
+    /// shows and "+N more" — so a selection with many keywords cannot lay them all out.
+    #[test]
+    fn whole_path_chips_stop_at_the_bound() {
+        let mut app = crate::LightcraftApp::new(lightcraft_engine::Session::with_demo(), crate::Services::default());
+        let id = app.session.visible_cloned()[0].0;
+        let keywords: Vec<String> = (0..60).map(|i| format!("keyword-{i:02}")).collect();
+        let _ = app.run("library.select", serde_json::json!({"ids": [id]}));
+        let _ = app.run("photo.setMeta", serde_json::json!({"addKeywords": keywords}));
+        let selection = app.session.selected();
+        assert_eq!(app.ui.settings.keyword_chips, crate::state::KeywordChips::Paths, "the default mode");
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        crate::theme::apply(&ctx);
+        let raw = crate::headless::HeadlessView::raw_input(egui::vec2(600.0, 900.0), 1.0, 0.0, vec![]);
+        let mut out = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+                super::chip_row(&mut app, ui, &selection);
+            });
+        });
+        out.textures_delta.clear();
+        let widgets = crate::widgets::take_registry(&ctx);
+        let chips = widgets.iter().filter(|(w, _)| w.starts_with("keywordChip:")).count();
+        assert!(chips < 60, "{chips} of 60 chips laid out: the bound is gone");
+        assert!(widgets.iter().any(|(w, _)| w == "keywordChipsMore"), "{chips} chips and no +N more");
     }
 
     /// Given a library with Places › Lisbon, the box offers it for "lis" (not for photos that all
